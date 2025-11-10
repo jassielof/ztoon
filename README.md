@@ -6,24 +6,24 @@ A Zig implementation of the TOON (Token-Oriented Object Notation) format, versio
 
 TOON is a line-oriented, indentation-based text format that encodes the JSON data model with explicit structure and minimal quoting. It's particularly efficient for arrays of uniform objects, providing a more compact and readable alternative to JSON for structured data.
 
-See the [full specification](./spec/SPEC.md) for details.
+See the [full specification](https://github.com/toon-format/spec) for details in depth.
 
 ## Features
 
-- ✅ **Core Encoding/Decoding**: Full JSON ↔ TOON conversion
-- ✅ **Primitives**: strings, numbers, booleans, null with smart quoting
-- ✅ **Objects**: Nested objects with indentation-based structure
-- ✅ **Arrays**: Both inline (primitives) and multi-line (objects/nested)
-- ✅ **Tabular Arrays**: Compact `[N]{field1,field2}:` format for uniform object arrays
-- ✅ **Alternative Delimiters**: Comma (default), tab (`\t`), and pipe (`|`) support
-- ✅ **Delimiter Detection**: Automatic delimiter detection in array headers `[N<delim>]`
-- ✅ **CLI Tool**: Encode and decode via command line or pipes
+- [x] **Core Encoding/Decoding**: Full JSON ↔ TOON conversion
+- [x] **Primitives**: strings, numbers, booleans, null with smart quoting
+- [x] **Objects**: Nested objects with indentation-based structure
+- [x] **Arrays**: Both inline (primitives) and multi-line (objects/nested)
+- [x] **Tabular Arrays**: Compact `[N]{field1,field2}:` format for uniform object arrays
+- [x] **Alternative Delimiters**: Comma (default), tab (`\t`), and pipe (`|`) support
+- [x] **Delimiter Detection**: Automatic delimiter detection in array headers `[N<delim>]`
+- [x] **CLI Tool**: Encode and decode via command line or pipes
 
 ## Building
 
 Requires Zig 0.15.2 or later:
 
-```bash
+```
 zig build
 ```
 
