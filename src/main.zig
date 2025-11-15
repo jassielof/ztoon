@@ -1,5 +1,6 @@
 const std = @import("std");
 const toon = @import("ztoon");
+const CommandError = @import("errors.zig").CommandError;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -8,7 +9,6 @@ pub fn main() !void {
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
-
     if (args.len < 2) {
         try printUsage();
         return;
@@ -27,12 +27,12 @@ pub fn main() !void {
     } else {
         std.debug.print("Unknown command: {s}\n", .{command});
         try printUsage();
-        return error.UnknownCommand;
+        return;
     }
 }
 
 fn printUsage() !void {
-    try std.fs.File.stdout().writeAll(
+    const usage =
         \\Usage: ztoon <command> [options]
         \\
         \\Commands:
@@ -42,7 +42,12 @@ fn printUsage() !void {
         \\
         \\If no file is provided, reads from stdin.
         \\
-    );
+    ;
+    var stdout_buffer: [usage.len]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    const stdout = &stdout_writer.interface;
+    try stdout.print("{s}", .{usage});
+    try stdout.flush();
 }
 
 fn encodeCommand(allocator: std.mem.Allocator, args: [][:0]const u8) !void {
