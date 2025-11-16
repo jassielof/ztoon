@@ -1,9 +1,45 @@
+//! TOON decoder - parses TOON format strings into Value structures
+//!
+//! This module provides functionality to parse TOON format text into
+//! structured Value objects. The decoder handles:
+//! - Indentation-based structure parsing
+//! - Multiple array formats (inline, list, tabular)
+//! - Automatic delimiter detection
+//! - String escaping and unquoting
+//! - Type inference for primitives
+//! - Error reporting with line/column information
+
 const std = @import("std");
 const types = @import("types.zig");
 const Value = types.Value;
 const DecodeOptions = types.DecodeOptions;
 const Delimiter = types.Delimiter;
 
+/// Decodes a TOON format string into a Value.
+///
+/// This is the main entry point for decoding. It parses the input string
+/// according to the TOON specification and constructs a Value tree.
+///
+/// The returned Value owns its memory and must be freed using `value.deinit(allocator)`.
+///
+/// Parameters:
+/// - `allocator`: Memory allocator for value construction
+/// - `input`: TOON format string to parse
+/// - `options`: Parsing options (indent size, strict mode)
+///
+/// Returns:
+/// - A Value representing the parsed TOON data
+///
+/// Errors:
+/// - Returns parsing errors if the input is malformed
+/// - Returns allocation errors if memory allocation fails
+///
+/// Example:
+/// ```zig
+/// const input = "name: Alice\nage: 30";
+/// var value = try decode(allocator, input, .{});
+/// defer value.deinit(allocator);
+/// ```
 pub fn decode(allocator: std.mem.Allocator, input: []const u8, options: DecodeOptions) !Value {
     var parser = Parser{
         .allocator = allocator,
@@ -16,13 +52,28 @@ pub fn decode(allocator: std.mem.Allocator, input: []const u8, options: DecodeOp
     return try parser.parseValue(0);
 }
 
+/// Internal parser state for TOON decoding.
+///
+/// Maintains the current position in the input, tracks line numbers for
+/// error reporting, and holds configuration options.
 const Parser = struct {
+    /// Allocator for creating Values and strings
     allocator: std.mem.Allocator,
+    /// The input TOON string being parsed
     input: []const u8,
+    /// Current byte position in the input
     pos: usize,
+    /// Current line number (1-indexed, for error reporting)
     line: usize,
+    /// Decoding options
     options: DecodeOptions,
 
+    /// Calculates the current line and column position in the input.
+    ///
+    /// Used for error reporting to provide precise location information.
+    ///
+    /// Returns:
+    /// - Anonymous struct with `line` and `col` fields (both 1-indexed)
     fn getLineAndCol(self: *Parser) struct { line: usize, col: usize } {
         var line: usize = 1;
         var col: usize = 1;
@@ -38,11 +89,28 @@ const Parser = struct {
         return .{ .line = line, .col = col };
     }
 
+    /// Prints a formatted error message with line and column information.
+    ///
+    /// Parameters:
+    /// - `message`: Error message to display
     fn reportError(self: *Parser, comptime message: []const u8) void {
         const loc = self.getLineAndCol();
         std.debug.print("TOON Parse Error at line {d}, column {d}: {s}\n", .{ loc.line, loc.col, message });
     }
 
+    /// Parses a value at the current position.
+    ///
+    /// Automatically detects the value type:
+    /// - Root arrays (identifier followed by '['')
+    /// - Array headers ('[length]:')
+    /// - Objects (key-value pairs with ':')
+    /// - Primitives (null, bool, number, string)
+    ///
+    /// Parameters:
+    /// - `indent_level`: Expected indentation level for nested structures
+    ///
+    /// Returns:
+    /// - Parsed Value
     fn parseValue(self: *Parser, indent_level: usize) anyerror!Value {
         self.skipWhitespace();
 
@@ -85,6 +153,17 @@ const Parser = struct {
         return try self.parseArray(0, null);
     }
 
+    /// Parses an object (collection of key-value pairs).
+    ///
+    /// Objects are parsed as indented key-value pairs, where each line at
+    /// the current indent level represents an entry. Nested objects and
+    /// arrays are handled recursively.
+    ///
+    /// Parameters:
+    /// - `indent_level`: Expected indentation level for object entries
+    ///
+    /// Returns:
+    /// - Value containing the parsed object
     fn parseObject(self: *Parser, indent_level: usize) anyerror!Value {
         var obj = std.StringArrayHashMap(Value).init(self.allocator);
         errdefer {
@@ -163,6 +242,21 @@ const Parser = struct {
         return Value{ .object = obj };
     }
 
+    /// Parses an array from its header and content.
+    ///
+    /// Handles three array formats:
+    /// 1. Tabular arrays with field headers: `[3]{name,age}: ...`
+    /// 2. Inline arrays: `[3]: value1, value2, value3`
+    /// 3. List arrays: `[3]: \n - item1 \n - item2 \n - item3`
+    ///
+    /// The delimiter is automatically detected from the content or header.
+    ///
+    /// Parameters:
+    /// - `indent_level`: Current indentation level
+    /// - `key`: Optional key name (currently unused but reserved for future use)
+    ///
+    /// Returns:
+    /// - Value containing the parsed array
     fn parseArray(self: *Parser, indent_level: usize, key: ?[]const u8) anyerror!Value {
         _ = key;
         _ = indent_level;
@@ -354,6 +448,17 @@ const Parser = struct {
         return Value{ .array = items };
     }
 
+    /// Parses a primitive value (null, boolean, number, or string).
+    ///
+    /// Type detection order:
+    /// 1. Quoted strings (start with '"')
+    /// 2. null literal
+    /// 3. Boolean literals (true/false)
+    /// 4. Numeric values (integers and floats)
+    /// 5. Unquoted strings (fallback)
+    ///
+    /// Returns:
+    /// - Value containing the parsed primitive
     fn parsePrimitive(self: *Parser) anyerror!Value {
         self.skipSpaces();
 
@@ -401,6 +506,17 @@ const Parser = struct {
         }
     }
 
+    /// Parses a quoted string with escape sequence processing.
+    ///
+    /// Handles standard escape sequences:
+    /// - \n: newline
+    /// - \r: carriage return
+    /// - \t: tab
+    /// - \\: backslash
+    /// - \": quote
+    ///
+    /// Returns:
+    /// - Value containing the unescaped string
     fn parseQuotedString(self: *Parser) anyerror!Value {
         if (self.input[self.pos] != '"') {
             self.reportError("Expected '\"' to start quoted string");
@@ -446,6 +562,12 @@ const Parser = struct {
         return error.UnterminatedString;
     }
 
+    /// Parses an object key (quoted or unquoted identifier).
+    ///
+    /// Keys are terminated by ':', '[', space, or newline.
+    ///
+    /// Returns:
+    /// - Owned string containing the key name
     fn parseKey(self: *Parser) anyerror![]const u8 {
         self.skipSpaces();
 
@@ -466,6 +588,15 @@ const Parser = struct {
         return try self.allocator.dupe(u8, self.input[start..self.pos]);
     }
 
+    /// Parses a field name from a tabular array header.
+    ///
+    /// Similar to parseKey but uses the array's delimiter for termination.
+    ///
+    /// Parameters:
+    /// - `delimiter`: The delimiter character for this array
+    ///
+    /// Returns:
+    /// - Owned string containing the field name
     fn parseFieldName(self: *Parser, delimiter: Delimiter) anyerror![]const u8 {
         self.skipSpaces();
 
@@ -486,12 +617,20 @@ const Parser = struct {
         return try self.allocator.dupe(u8, self.input[start..self.pos]);
     }
 
+    /// Checks if an array header '[' appears at the current position.
+    ///
+    /// Returns:
+    /// - `true` if '[' is found after skipping spaces
     fn peekArrayHeader(self: *Parser) bool {
         var i = self.pos;
         while (i < self.input.len and self.input[i] == ' ') i += 1;
         return i < self.input.len and self.input[i] == '[';
     }
 
+    /// Checks if the current line contains an object key (has a ':').
+    ///
+    /// Returns:
+    /// - `true` if ':' appears before newline on current line
     fn peekObjectKey(self: *Parser) anyerror!bool {
         var i = self.pos;
         while (i < self.input.len) {
@@ -503,6 +642,10 @@ const Parser = struct {
         return false;
     }
 
+    /// Gets the current indentation level (in multiples of indent size).
+    ///
+    /// Returns:
+    /// - Number of indent units at current position
     fn getCurrentIndent(self: *Parser) usize {
         var indent: usize = 0;
         var i = self.pos;
@@ -513,6 +656,9 @@ const Parser = struct {
         return indent / self.options.indent;
     }
 
+    /// Skips all whitespace characters (spaces, newlines, carriage returns).
+    ///
+    /// Updates line counter when newlines are encountered.
     fn skipWhitespace(self: *Parser) void {
         while (self.pos < self.input.len) {
             const c = self.input[self.pos];
@@ -525,12 +671,16 @@ const Parser = struct {
         }
     }
 
+    /// Skips space characters only (not newlines).
     fn skipSpaces(self: *Parser) void {
         while (self.pos < self.input.len and self.input[self.pos] == ' ') {
             self.pos += 1;
         }
     }
 
+    /// Advances position to the start of the next line.
+    ///
+    /// Updates line counter when newline is found.
     fn skipToNextLine(self: *Parser) void {
         while (self.pos < self.input.len) {
             if (self.input[self.pos] == '\n') {

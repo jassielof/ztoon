@@ -1,7 +1,33 @@
+//! TOON command-line interface
+//!
+//! This CLI tool provides commands for converting between JSON and TOON formats.
+//! It can read from files or stdin and outputs to stdout.
+//!
+//! ## Commands
+//!
+//! - `encode [file]`: Convert JSON to TOON format
+//! - `decode [file]`: Convert TOON to JSON format
+//! - `help`: Display usage information
+//!
+//! ## Examples
+//!
+//! Encode JSON file to TOON:
+//! ```sh
+//! ztoon encode input.json > output.toon
+//! ```
+//!
+//! Decode TOON from stdin:
+//! ```sh
+//! cat input.toon | ztoon decode > output.json
+//! ```
+
 const std = @import("std");
 const ztoon = @import("ztoon");
 const CommandError = ztoon.CommandError;
 
+/// Main entry point for the TOON CLI.
+///
+/// Parses command-line arguments and dispatches to appropriate command handler.
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -31,6 +57,9 @@ pub fn main() !void {
     }
 }
 
+/// Prints usage information to stdout.
+///
+/// Displays available commands and basic usage examples.
 fn printUsage() !void {
     const usage =
         \\Usage: ztoon <command> [options]
@@ -50,6 +79,14 @@ fn printUsage() !void {
     try stdout.flush();
 }
 
+/// Handles the 'encode' command - converts JSON to TOON.
+///
+/// Reads JSON input from a file or stdin, parses it, converts to TOON format,
+/// and writes the result to stdout.
+///
+/// Parameters:
+/// - `allocator`: Memory allocator
+/// - `args`: Command arguments (optional filename)
 fn encodeCommand(allocator: std.mem.Allocator, args: [][:0]const u8) !void {
     // Read input (from file or stdin)
     const input = if (args.len > 0)
@@ -76,6 +113,14 @@ fn encodeCommand(allocator: std.mem.Allocator, args: [][:0]const u8) !void {
     try stdout.writeAll("\n");
 }
 
+/// Handles the 'decode' command - converts TOON to JSON.
+///
+/// Reads TOON input from a file or stdin, parses it, converts to JSON format,
+/// and writes the result to stdout.
+///
+/// Parameters:
+/// - `allocator`: Memory allocator
+/// - `args`: Command arguments (optional filename)
 fn decodeCommand(allocator: std.mem.Allocator, args: [][:0]const u8) !void {
     // Read input (from file or stdin)
     const input = if (args.len > 0)
@@ -94,6 +139,14 @@ fn decodeCommand(allocator: std.mem.Allocator, args: [][:0]const u8) !void {
     try stdout.writeAll("\n");
 }
 
+/// Writes a TOON Value as formatted JSON to a file.
+///
+/// Recursively serializes the value with proper indentation and formatting.
+///
+/// Parameters:
+/// - `file`: File to write output to
+/// - `value`: The TOON value to serialize
+/// - `indent`: Current indentation level
 fn writeJson(file: std.fs.File, value: ztoon.Value, indent: usize) anyerror!void {
     switch (value) {
         .null => try file.writeAll("null"),
@@ -153,6 +206,11 @@ fn writeJson(file: std.fs.File, value: ztoon.Value, indent: usize) anyerror!void
     }
 }
 
+/// Writes indentation spaces to a file.
+///
+/// Parameters:
+/// - `file`: File to write to
+/// - `indent`: Number of indentation levels (each level is 2 spaces)
 fn writeIndentSpaces(file: std.fs.File, indent: usize) !void {
     var i: usize = 0;
     while (i < indent * 2) : (i += 1) {
@@ -160,6 +218,17 @@ fn writeIndentSpaces(file: std.fs.File, indent: usize) !void {
     }
 }
 
+/// Converts std.json.Value to ztoon.Value.
+///
+/// Recursively converts a JSON parse tree into a TOON Value structure,
+/// handling all JSON types including nested objects and arrays.
+///
+/// Parameters:
+/// - `allocator`: Memory allocator for new Value construction
+/// - `json_val`: The JSON value to convert
+///
+/// Returns:
+/// - A ztoon.Value equivalent of the JSON value
 fn jsonValueToToonValue(allocator: std.mem.Allocator, json_val: std.json.Value) !ztoon.Value {
     return switch (json_val) {
         .null => ztoon.Value{ .null = {} },
