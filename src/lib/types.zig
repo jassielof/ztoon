@@ -1,162 +1,54 @@
-//! Core data types for the TOON library
-//!
-//! This module defines the fundamental types used throughout the TOON encoder
-//! and decoder, including the Value type for representing data, delimiter types,
-//! and configuration options.
-
 const std = @import("std");
+const constants = @import("constants.zig");
 
-/// Represents a JSON-compatible value that can be encoded to or decoded from TOON.
-///
-/// The Value type is a tagged union that can represent any valid JSON data structure:
-/// - `null`: JSON null value
-/// - `bool`: Boolean true/false
-/// - `number`: 64-bit floating point number
-/// - `string`: UTF-8 string slice
-/// - `array`: Dynamic array of Values
-/// - `object`: String-keyed hash map of Values
-///
-/// ## Memory Management
-///
-/// Values own their memory and must be freed using `deinit()` when no longer needed.
-/// This recursively frees all nested structures.
-///
-/// ## Example
-///
-/// ```zig
-/// var value = Value{ .string = try allocator.dupe(u8, "hello") };
-/// defer value.deinit(allocator);
-/// ```
-pub const Value = union(enum) {
-    null: void,
-    bool: bool,
-    number: f64,
-    string: []const u8,
-    array: []Value,
-    object: std.StringArrayHashMap(Value),
-
-    /// Recursively frees all memory owned by this Value.
-    ///
-    /// This function handles cleanup for strings, arrays, and objects,
-    /// recursively freeing nested structures. Safe to call on all value types.
-    ///
-    /// Parameters:
-    /// - `self`: Pointer to the Value to free
-    /// - `allocator`: The allocator used to allocate this Value's memory
-    pub fn deinit(self: *Value, allocator: std.mem.Allocator) void {
-        switch (self.*) {
-            .string => |s| allocator.free(s),
-            .array => |arr| {
-                for (arr) |*item| {
-                    item.deinit(allocator);
-                }
-                allocator.free(arr);
-            },
-            .object => |*obj| {
-                var iter = obj.iterator();
-                while (iter.next()) |entry| {
-                    allocator.free(entry.key_ptr.*);
-                    entry.value_ptr.deinit(allocator);
-                }
-                obj.deinit();
-            },
-            else => {},
-        }
-    }
+pub const JsonPrimitive = union(enum) { string: []const u8, number: f64, boolean: bool, null: void };
+pub const JsonObject = std.StringArrayHashMap(JsonValue);
+pub const JsonArray = std.ArrayList(JsonValue);
+pub const JsonValue = union(enum) {
+    primitive: JsonPrimitive,
+    object: JsonObject,
+    array: JsonArray,
 };
 
-/// Delimiter types for separating elements in TOON arrays.
-///
-/// TOON supports three delimiter types for array elements:
-/// - `comma`: Standard comma separator (default)
-/// - `tab`: Tab character separator (useful for TSV-style data)
-/// - `pipe`: Pipe character separator (useful when data contains commas)
-///
-/// The delimiter can be specified in array headers and is automatically
-/// detected during parsing.
-pub const Delimiter = enum {
-    comma,
-    tab,
-    pipe,
-
-    /// Converts a Delimiter enum value to its character representation.
-    ///
-    /// Returns:
-    /// - `','` for comma
-    /// - `'\t'` for tab
-    /// - `'|'` for pipe
-    pub fn toChar(self: Delimiter) u8 {
-        return switch (self) {
-            .comma => ',',
-            .tab => '\t',
-            .pipe => '|',
-        };
-    }
-
-    /// Attempts to convert a character to a Delimiter enum value.
-    ///
-    /// Returns `null` if the character does not represent a valid delimiter.
-    ///
-    /// Parameters:
-    /// - `c`: The character to convert
-    ///
-    /// Returns:
-    /// - `.comma` for ','
-    /// - `.tab` for '\t'
-    /// - `.pipe` for '|'
-    /// - `null` for any other character
-    pub fn fromChar(c: u8) ?Delimiter {
-        return switch (c) {
-            ',' => .comma,
-            '\t' => .tab,
-            '|' => .pipe,
-            else => null,
-        };
-    }
+/// Options for encoding TOON data.
+pub const EncodingOptions = struct {
+    /// Number of spaces per indentation level.
+    indent: ?u64 = 2,
+    /// Delimiter to use for tabular array rows and inline primitive arrays.
+    delimiter: ?constants.Delimiter = constants.Delimiters.comma,
+    /// Whether to enable key folding to collapse single-key wrapper chains.
+    /// When set to 'safe', nested objects with single keys are collapsed into dotted paths (e.g., data.metadata.items instead of nested indentation).
+    key_folding: enum { off, safe } = .off,
+    /// Maximum number of segmest to fold when key folding is enabled.
+    /// Controls how deep the folding can go in single-key chains.
+    /// Values 0 or 1 have no practical effect (treated as effectively disabled).
+    flatten_depth: ?u64 = null,
 };
 
-/// Configuration options for encoding values to TOON format.
-///
-/// These options control the formatting and style of the generated TOON output.
-///
-/// ## Fields
-///
-/// - `indent`: Number of spaces per indentation level (default: 2)
-/// - `delimiter`: Delimiter character for array elements (default: comma)
-///
-/// ## Example
-///
-/// ```zig
-/// const options = ztoon.EncodeOptions{
-///     .indent = 4,
-///     .delimiter = .pipe,
-/// };
-/// const output = try ztoon.encode(allocator, value, options);
-/// ```
-pub const EncodeOptions = struct {
-    indent: usize = 2,
-    delimiter: Delimiter = .comma,
+pub const ResolvedEncodingOptions = EncodingOptions;
+
+/// Options for decoding TOON data.
+pub const DecodingOptions = struct {
+    /// Number of spaces per indentation level.
+    indent: ?u64 = 2,
+    /// Whether to enforce strict validation of array lengths and tabular row counts.
+    strict: bool = true,
+    /// Whether to enable path expansion to reconstruct dotted keys into nested objects.
+    /// When set to 'safe', keys containing dots are expanded into nested structures if all segments are valid identifiers (e.g., data.metadata.items becomes nested objects).
+    /// Pairs with key folding set to 'safe' for lossless round-trips.
+    expand_paths: enum { off, safe } = .off,
 };
 
-/// Configuration options for decoding TOON format to values.
-///
-/// These options control the parsing behavior and validation level.
-///
-/// ## Fields
-///
-/// - `indent`: Expected number of spaces per indentation level (default: 2)
-/// - `strict`: Whether to enforce strict parsing rules (default: false)
-///
-/// ## Example
-///
-/// ```zig
-/// const options = ztoon.DecodeOptions{
-///     .indent = 4,
-///     .strict = true,
-/// };
-/// var value = try ztoon.decode(allocator, toon_input, options);
-/// ```
-pub const DecodeOptions = struct {
-    indent: usize = 2,
-    strict: bool = false,
+pub const ResolvedDecodingOptions = DecodingOptions;
+
+pub const ArrayHeaderInfo = struct { key: ?[]const u8, length: u64, delimiter: constants.Delimiter, fields: ?[]const []const u8 };
+
+pub const ParsedLine = struct { raw: []const u8, depth: Depth, indent: u64, content: []const u8, line_number: u64 };
+
+pub const BlankLineInfo = struct {
+    line_number: u64,
+    indent: u64,
+    depth: Depth,
 };
+
+pub const Depth = u64;
