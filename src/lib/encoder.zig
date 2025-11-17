@@ -40,11 +40,11 @@ const Delimiter = types.Delimiter;
 /// defer allocator.free(toon);
 /// ```
 pub fn encode(allocator: std.mem.Allocator, value: Value, options: EncodeOptions) ![]const u8 {
-    var list: std.ArrayList(u8) = .{};
+    var list: std.ArrayList(u8) = .empty;
     errdefer list.deinit(allocator);
 
-    try encodeValue(&list, value, options, 0, allocator);
-    return list.toOwnedSlice(allocator);
+    try encodeValue(&list, value, options, 0, false, allocator);
+    return try list.toOwnedSlice(allocator);
 }
 
 /// Internal function to recursively encode a value.
@@ -56,13 +56,14 @@ pub fn encode(allocator: std.mem.Allocator, value: Value, options: EncodeOptions
 /// - `value`: The value to encode
 /// - `options`: Encoding options
 /// - `depth`: Current nesting depth for indentation
+/// - `inline_first`: Whether to inline the first field of objects (for list items)
 /// - `allocator`: Memory allocator
-fn encodeValue(writer: *std.ArrayList(u8), value: Value, options: EncodeOptions, depth: usize, allocator: std.mem.Allocator) anyerror!void {
+fn encodeValue(writer: *std.ArrayList(u8), value: Value, options: EncodeOptions, depth: usize, inline_first: bool, allocator: std.mem.Allocator) anyerror!void {
     switch (value) {
         .null => try writer.appendSlice(allocator, "null"),
         .bool => |b| try writer.appendSlice(allocator, if (b) "true" else "false"),
         .number => |n| {
-            // Simple number formatting
+            // Simple number formatting with canonical decimal form (no exponent)
             const min_i64: f64 = @floatFromInt(std.math.minInt(i64));
             const max_i64: f64 = @floatFromInt(std.math.maxInt(i64));
             if (@floor(n) == n and n >= min_i64 and n <= max_i64) {
@@ -71,9 +72,9 @@ fn encodeValue(writer: *std.ArrayList(u8), value: Value, options: EncodeOptions,
                 try std.fmt.format(writer.writer(allocator), "{d}", .{n});
             }
         },
-        .string => |s| try encodeString(writer, s, options.delimiter, allocator),
+        .string => |s| try encodeString(writer, s, options.delimiter, false, allocator),
         .array => |arr| try encodeArray(writer, arr, options, depth, null, allocator),
-        .object => |obj| try encodeObject(writer, obj, options, depth, allocator),
+        .object => |obj| try encodeObject(writer, obj, options, depth, inline_first, allocator),
     }
 }
 
@@ -89,9 +90,10 @@ fn encodeValue(writer: *std.ArrayList(u8), value: Value, options: EncodeOptions,
 /// - `writer`: ArrayList to append output to
 /// - `s`: The string to encode
 /// - `delimiter`: Current delimiter (affects quoting decisions)
+/// - `is_key`: Whether this is an object key (uses stricter quoting rules)
 /// - `allocator`: Memory allocator
-fn encodeString(writer: *std.ArrayList(u8), s: []const u8, delimiter: Delimiter, allocator: std.mem.Allocator) anyerror!void {
-    if (needsQuoting(s, delimiter)) {
+fn encodeString(writer: *std.ArrayList(u8), s: []const u8, delimiter: Delimiter, is_key: bool, allocator: std.mem.Allocator) anyerror!void {
+    if (needsQuoting(s, delimiter, is_key)) {
         try writer.append(allocator, '"');
         for (s) |c| {
             switch (c) {
@@ -118,27 +120,53 @@ fn encodeString(writer: *std.ArrayList(u8), s: []const u8, delimiter: Delimiter,
 /// - A numeric value
 /// - Contains special characters that have meaning in TOON syntax
 ///
+/// For keys, stricter rules apply (§7.3): only strings matching ^[A-Za-z_][A-Za-z0-9_.]*$
+/// can be unquoted.
+///
 /// Parameters:
 /// - `s`: The string to check
 /// - `delimiter`: Current delimiter character
+/// - `is_key`: Whether this is an object key (uses stricter §7.3 rules)
 ///
 /// Returns:
 /// - `true` if the string should be quoted, `false` otherwise
-fn needsQuoting(s: []const u8, delimiter: Delimiter) bool {
+fn needsQuoting(s: []const u8, delimiter: Delimiter, is_key: bool) bool {
     if (s.len == 0) return true;
 
+    // For keys, use strict regex: ^[A-Za-z_][A-Za-z0-9_.]*$
+    if (is_key) {
+        // First character must be letter or underscore
+        if (!((s[0] >= 'A' and s[0] <= 'Z') or (s[0] >= 'a' and s[0] <= 'z') or s[0] == '_')) {
+            return true;
+        }
+        // Remaining characters must be alphanumeric, underscore, or dot
+        for (s[1..]) |c| {
+            if (!((c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_' or c == '.')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // For values, use standard TOON quoting rules
     // Check if it looks like a literal
     if (std.mem.eql(u8, s, "true") or std.mem.eql(u8, s, "false") or std.mem.eql(u8, s, "null")) {
         return true;
     }
 
-    // Check if it looks like a number
+    // Check if it looks like a number (including scientific notation)
     if (looksLikeNumber(s)) return true;
 
-    // Check for special characters
+    // Check if it starts with hyphen (§7.2: "-" or starts with "-" MUST be quoted)
+    if (s[0] == '-') return true;
+
+    // Check for leading or trailing whitespace
+    if (s[0] == ' ' or s[s.len - 1] == ' ') return true;
+
+    // Check for control characters and structural characters
     const delim_char = delimiter.toChar();
     for (s) |c| {
-        if (c == delim_char or c == '\n' or c == '\r' or c == '"' or c == '\\' or c == ':' or c == '[' or c == ']' or c == '{' or c == '}' or c == ' ') {
+        if (c == delim_char or c == '\n' or c == '\r' or c == '\t' or c == '"' or c == '\\' or c == ':' or c == '[' or c == ']' or c == '{' or c == '}') {
             return true;
         }
     }
@@ -152,6 +180,7 @@ fn needsQuoting(s: []const u8, delimiter: Delimiter) bool {
 /// - Optional leading minus sign
 /// - One or more digits
 /// - Optional decimal point
+/// - Optional scientific notation (e or E with optional sign)
 ///
 /// Parameters:
 /// - `s`: The string to check
@@ -170,6 +199,18 @@ fn looksLikeNumber(s: []const u8) bool {
             has_digit = true;
         } else if (s[i] == '.') {
             // Allow decimal point
+        } else if (s[i] == 'e' or s[i] == 'E') {
+            // Scientific notation - check if followed by optional sign and digit
+            if (i + 1 < s.len) {
+                const next = s[i + 1];
+                if (next == '+' or next == '-') {
+                    // Skip the sign and check remaining
+                    i += 1;
+                }
+            }
+            // Continue checking remaining digits
+        } else if (s[i] == '+' or s[i] == '-') {
+            // Allow sign after 'e' or 'E'
         } else {
             return false;
         }
@@ -188,32 +229,39 @@ fn looksLikeNumber(s: []const u8) bool {
 /// - `obj`: The object (hash map) to encode
 /// - `options`: Encoding options
 /// - `depth`: Current nesting depth for indentation
+/// - `inline_first`: Whether to put the first field inline (for list items)
 /// - `allocator`: Memory allocator
-fn encodeObject(writer: *std.ArrayList(u8), obj: std.StringArrayHashMap(Value), options: EncodeOptions, depth: usize, allocator: std.mem.Allocator) anyerror!void {
+fn encodeObject(writer: *std.ArrayList(u8), obj: std.StringArrayHashMap(Value), options: EncodeOptions, depth: usize, inline_first: bool, allocator: std.mem.Allocator) anyerror!void {
     var iter = obj.iterator();
     var first = true;
     while (iter.next()) |entry| {
-        if (depth > 0) {
+        if (!first or (depth > 0 and !inline_first)) {
             try writer.append(allocator, '\n');
-            try writeIndent(writer, depth, options.indent, allocator);
-        } else {
-            // For top-level objects, add newline between entries
-            if (!first) {
-                try writer.append(allocator, '\n');
-            }
-            first = false;
         }
-
-        try encodeString(writer, entry.key_ptr.*, options.delimiter, allocator);
-        try writer.append(allocator, ':');
+        if (depth > 0 and !(first and inline_first)) {
+            // For list items, subsequent fields need extra indentation
+            const indent_depth = if (inline_first and !first) depth + 1 else depth;
+            try writeIndent(writer, indent_depth, options.indent, allocator);
+        }
+        first = false;
 
         switch (entry.value_ptr.*) {
-            .object, .array => {
-                try encodeValue(writer, entry.value_ptr.*, options, depth + 1, allocator);
+            .array => |arr| {
+                // For arrays, pass the key to encodeArray so it can write "key[length]:" format
+                try encodeArray(writer, arr, options, depth, entry.key_ptr.*, allocator);
+            },
+            .object => {
+                try encodeString(writer, entry.key_ptr.*, options.delimiter, true, allocator);
+                try writer.append(allocator, ':');
+                // For list items' subsequent fields, the nested object should be at depth+2
+                const nested_depth = if (inline_first and !first) depth + 2 else depth + 1;
+                try encodeObject(writer, entry.value_ptr.*.object, options, nested_depth, false, allocator);
             },
             else => {
+                try encodeString(writer, entry.key_ptr.*, options.delimiter, true, allocator);
+                try writer.append(allocator, ':');
                 try writer.append(allocator, ' ');
-                try encodeValue(writer, entry.value_ptr.*, options, depth, allocator);
+                try encodeValue(writer, entry.value_ptr.*, options, depth, false, allocator);
             },
         }
     }
@@ -240,11 +288,16 @@ fn encodeObject(writer: *std.ArrayList(u8), obj: std.StringArrayHashMap(Value), 
 /// - `allocator`: Memory allocator
 fn encodeArray(writer: *std.ArrayList(u8), arr: []Value, options: EncodeOptions, depth: usize, key: ?[]const u8, allocator: std.mem.Allocator) anyerror!void {
     if (key) |k| {
-        try encodeString(writer, k, options.delimiter, allocator);
+        try encodeString(writer, k, options.delimiter, true, allocator);
     }
 
     if (arr.len == 0) {
-        try writer.appendSlice(allocator, "[0]:");
+        try writer.append(allocator, '[');
+        try writer.append(allocator, '0');
+        if (options.delimiter != .comma) {
+            try writer.append(allocator, options.delimiter.toChar());
+        }
+        try writer.appendSlice(allocator, "]:");
         return;
     }
 
@@ -256,12 +309,15 @@ fn encodeArray(writer: *std.ArrayList(u8), arr: []Value, options: EncodeOptions,
         // Tabular format
         try writer.append(allocator, '[');
         try std.fmt.format(writer.writer(allocator), "{d}", .{arr.len});
+        if (options.delimiter != .comma) {
+            try writer.append(allocator, options.delimiter.toChar());
+        }
         try writer.appendSlice(allocator, "]{");
 
         // Write field list
         for (info.fields, 0..) |field, i| {
             if (i > 0) try writer.append(allocator, options.delimiter.toChar());
-            try encodeString(writer, field, options.delimiter, allocator);
+            try encodeString(writer, field, options.delimiter, true, allocator);
         }
         try writer.appendSlice(allocator, "}:");
 
@@ -274,16 +330,20 @@ fn encodeArray(writer: *std.ArrayList(u8), arr: []Value, options: EncodeOptions,
             for (info.fields, 0..) |field, i| {
                 if (i > 0) try writer.append(allocator, options.delimiter.toChar());
                 if (obj.get(field)) |value| {
-                    try encodeValue(writer, value, options, depth, allocator);
+                    try encodeValue(writer, value, options, depth, false, allocator);
                 }
             }
         }
         return;
     }
 
-    // Write array header: key[length]:
+    // Write array header: [length<delim>]:
     try writer.append(allocator, '[');
     try std.fmt.format(writer.writer(allocator), "{d}", .{arr.len});
+    // Include delimiter in header if not comma (default)
+    if (options.delimiter != .comma) {
+        try writer.append(allocator, options.delimiter.toChar());
+    }
     try writer.appendSlice(allocator, "]:");
 
     // Check if all elements are primitives
@@ -302,7 +362,7 @@ fn encodeArray(writer: *std.ArrayList(u8), arr: []Value, options: EncodeOptions,
         try writer.append(allocator, ' ');
         for (arr, 0..) |item, i| {
             if (i > 0) try writer.append(allocator, options.delimiter.toChar());
-            try encodeValue(writer, item, options, depth, allocator);
+            try encodeValue(writer, item, options, depth, false, allocator);
         }
     } else {
         // Multi-line array with list items
@@ -310,7 +370,7 @@ fn encodeArray(writer: *std.ArrayList(u8), arr: []Value, options: EncodeOptions,
             try writer.append(allocator, '\n');
             try writeIndent(writer, depth + 1, options.indent, allocator);
             try writer.appendSlice(allocator, "- ");
-            try encodeValue(writer, item, options, depth + 1, allocator);
+            try encodeValue(writer, item, options, depth + 1, true, allocator);
         }
     }
 }
@@ -346,7 +406,7 @@ fn detectTabular(arr: []Value, allocator: std.mem.Allocator) !?TabularInfo {
     }
 
     // Get fields from first object
-    var field_list = std.ArrayList([]const u8){};
+    var field_list: std.ArrayList([]const u8) = .empty;
     defer field_list.deinit(allocator);
 
     var iter = arr[0].object.iterator();

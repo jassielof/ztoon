@@ -141,6 +141,10 @@ const Parser = struct {
         }
 
         // Parse as primitive
+        // For root level (indent_level == 0), consume the entire line
+        if (indent_level == 0) {
+            return try self.parseRootPrimitive();
+        }
         return try self.parsePrimitive();
     }
 
@@ -151,6 +155,63 @@ const Parser = struct {
         }
 
         return try self.parseArray(0, null);
+    }
+
+    /// Parses a root-level primitive value (consumes entire line).
+    ///
+    /// For root-level values, we consume the entire line as the value,
+    /// allowing spaces within unquoted strings.
+    ///
+    /// Returns:
+    /// - Value containing the parsed primitive
+    fn parseRootPrimitive(self: *Parser) anyerror!Value {
+        self.skipSpaces();
+
+        if (self.pos >= self.input.len) {
+            return Value{ .null = {} };
+        }
+
+        // Quoted string
+        if (self.input[self.pos] == '"') {
+            return try self.parseQuotedString();
+        }
+
+        // Find end of line
+        const start = self.pos;
+        while (self.pos < self.input.len and self.input[self.pos] != '\n' and self.input[self.pos] != '\r') {
+            self.pos += 1;
+        }
+
+        // Trim trailing spaces
+        var end = self.pos;
+        while (end > start and self.input[end - 1] == ' ') {
+            end -= 1;
+        }
+
+        const token = self.input[start..end];
+
+        // null
+        if (std.mem.eql(u8, token, "null")) {
+            return Value{ .null = {} };
+        }
+
+        // boolean
+        if (std.mem.eql(u8, token, "true")) {
+            return Value{ .bool = true };
+        }
+        if (std.mem.eql(u8, token, "false")) {
+            return Value{ .bool = false };
+        }
+
+        // number (but check for leading zeros first - §4)
+        if (!hasLeadingZero(token)) {
+            if (std.fmt.parseFloat(f64, token)) |num| {
+                return Value{ .number = num };
+            } else |_| {}
+        }
+
+        // Unquoted string
+        return Value{ .string = try self.allocator.dupe(u8, token) };
     }
 
     /// Parses an object (collection of key-value pairs).
@@ -322,7 +383,7 @@ const Parser = struct {
             }
 
             // Parse field names
-            var fields = std.ArrayList([]const u8){};
+            var fields: std.ArrayList([]const u8) = .empty;
             errdefer {
                 for (fields.items) |field| {
                     self.allocator.free(field);
@@ -496,14 +557,16 @@ const Parser = struct {
             return Value{ .bool = false };
         }
 
-        // number
-        if (std.fmt.parseFloat(f64, token)) |num| {
-            return Value{ .number = num };
-        } else |_| {
-            // unquoted string
-            const str = try self.allocator.dupe(u8, token);
-            return Value{ .string = str };
+        // number (but check for leading zeros first - §4)
+        if (!hasLeadingZero(token)) {
+            if (std.fmt.parseFloat(f64, token)) |num| {
+                return Value{ .number = num };
+            } else |_| {}
         }
+
+        // unquoted string
+        const str = try self.allocator.dupe(u8, token);
+        return Value{ .string = str };
     }
 
     /// Parses a quoted string with escape sequence processing.
@@ -524,7 +587,7 @@ const Parser = struct {
         }
         self.pos += 1;
 
-        var result: std.ArrayList(u8) = .{};
+        var result: std.ArrayList(u8) = .empty;
         errdefer result.deinit(self.allocator);
 
         while (self.pos < self.input.len) {
@@ -630,14 +693,33 @@ const Parser = struct {
     /// Checks if the current line contains an object key (has a ':').
     ///
     /// Returns:
-    /// - `true` if ':' appears before newline on current line
+    /// - `true` if ':' appears before newline on current line (outside quotes)
     fn peekObjectKey(self: *Parser) anyerror!bool {
         var i = self.pos;
         while (i < self.input.len) {
             const c = self.input[i];
-            if (c == ':') return true;
-            if (c == '\n') return false;
-            i += 1;
+            if (c == '"') {
+                // Skip quoted string
+                i += 1;
+                while (i < self.input.len) {
+                    if (self.input[i] == '\\') {
+                        // Skip escape sequence
+                        i += 2;
+                    } else if (self.input[i] == '"') {
+                        // End of quoted string
+                        i += 1;
+                        break;
+                    } else {
+                        i += 1;
+                    }
+                }
+            } else if (c == ':') {
+                return true;
+            } else if (c == '\n') {
+                return false;
+            } else {
+                i += 1;
+            }
         }
         return false;
     }
@@ -692,3 +774,47 @@ const Parser = struct {
         }
     }
 };
+
+/// Checks if a token has a leading zero (violates §4 of TOON spec).
+///
+/// According to §4, numbers cannot have leading zeros except for:
+/// - "0" by itself
+/// - "0." followed by digits (decimal numbers)
+/// - "-0" or "-0." (negative zero)
+///
+/// Examples:
+/// - "0" -> false (valid)
+/// - "0.5" -> false (valid)
+/// - "05" -> true (invalid - leading zero)
+/// - "007" -> true (invalid - leading zeros)
+/// - "-0" -> false (valid)
+/// - "-05" -> true (invalid - leading zero)
+///
+/// Parameters:
+/// - `token`: The token to check
+///
+/// Returns:
+/// - `true` if the token has a forbidden leading zero
+fn hasLeadingZero(token: []const u8) bool {
+    if (token.len == 0) return false;
+
+    var i: usize = 0;
+
+    // Skip optional minus sign
+    if (token[i] == '-') {
+        i += 1;
+        if (i >= token.len) return false;
+    }
+
+    // Check if starts with '0'
+    if (token[i] != '0') return false;
+
+    // "0" by itself is valid
+    if (i + 1 >= token.len) return false;
+
+    // "0." is valid (decimal number)
+    if (token[i + 1] == '.') return false;
+
+    // "0" followed by anything else is invalid (leading zero)
+    return true;
+}
