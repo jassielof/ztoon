@@ -686,7 +686,7 @@ const Parser = struct {
         // Check if inline (same line) or multi-line
         if (self.pos < self.input.len and self.input[self.pos] != '\n') {
             // Inline array - use delimiter from header (already parsed above)
-            
+
             for (items, 0..) |*item, i| {
                 self.skipSpaces();
                 item.* = try self.parsePrimitive(delimiter);
