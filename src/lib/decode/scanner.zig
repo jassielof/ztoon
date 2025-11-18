@@ -92,11 +92,11 @@ pub fn toParsedLines(allocator: Allocator, source: []const u8, indent_size: u64,
         };
     }
 
-    var parsed = std.ArrayList(ParsedLine).init(allocator);
-    errdefer parsed.deinit();
+    var parsed = std.ArrayList(ParsedLine){};
+    errdefer parsed.deinit(allocator);
 
-    var blank_lines = std.ArrayList(BlankLineInfo).init(allocator);
-    errdefer blank_lines.deinit();
+    var blank_lines = std.ArrayList(BlankLineInfo){};
+    errdefer blank_lines.deinit(allocator);
 
     var lines = std.mem.splitScalar(u8, source, '\n');
     var line_number: u64 = 1;
@@ -112,7 +112,7 @@ pub fn toParsedLines(allocator: Allocator, source: []const u8, indent_size: u64,
         // Check if line is blank (only whitespace)
         if (std.mem.trim(u8, content, &std.ascii.whitespace).len == 0) {
             const depth = computeDepthFromIndent(indent, indent_size);
-            try blank_lines.append(BlankLineInfo{
+            try blank_lines.append(allocator, BlankLineInfo{
                 .line_number = line_number,
                 .indent = indent,
                 .depth = depth,
@@ -143,7 +143,7 @@ pub fn toParsedLines(allocator: Allocator, source: []const u8, indent_size: u64,
         }
 
         // Add parsed line
-        try parsed.append(ParsedLine{
+        try parsed.append(allocator, ParsedLine{
             .raw = raw,
             .indent = indent,
             .content = content,
@@ -155,8 +155,8 @@ pub fn toParsedLines(allocator: Allocator, source: []const u8, indent_size: u64,
     }
 
     return ScanResult{
-        .lines = try parsed.toOwnedSlice(),
-        .blank_lines = try blank_lines.toOwnedSlice(),
+        .lines = try parsed.toOwnedSlice(allocator),
+        .blank_lines = try blank_lines.toOwnedSlice(allocator),
         .allocator = allocator,
     };
 }

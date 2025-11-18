@@ -6,6 +6,14 @@ const decode_decoders = @import("decode/decoders.zig");
 const decode_expand = @import("decode/expand.zig");
 
 const Allocator = std.mem.Allocator;
+
+// Export types for external use (e.g., tests)
+pub const DecodingOptions = types.DecodingOptions;
+pub const EncodingOptions = types.EncodingOptions;
+pub const JsonValue = types.JsonValue;
+pub const JsonObject = types.JsonObject;
+pub const JsonArray = types.JsonArray;
+pub const JsonPrimitive = types.JsonPrimitive;
 // pub fn encode(allocator: std.mem.Allocator, input: types.JsonValue, options: ?types.EncodingOptions) ![]const u8 {
 //     var normalizedValue = normalizeValue(input);
 //     var resolvedOptions = resolveEncodingOptions(options);
@@ -57,12 +65,12 @@ pub fn decode(allocator: Allocator, input: []const u8, options: ?types.DecodingO
 //     };
 // }
 
-fn resolveDecodingOptions(options: ?types.DecodingOptions) !types.ResolvedDecodingOptions {
+fn resolveDecodingOptions(options: ?types.DecodingOptions) types.ResolvedDecodingOptions {
     if (options) |opts| {
         return .{
             .indent = opts.indent orelse 2,
-            .strict = opts.strict orelse true,
-            .expand_paths = opts.expand_paths orelse .off,
+            .strict = opts.strict,
+            .expand_paths = opts.expand_paths,
         };
     }
 

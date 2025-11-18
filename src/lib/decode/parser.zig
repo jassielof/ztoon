@@ -28,8 +28,8 @@ const DOT = constants.dot;
 
 /// Unescapes a string by processing escape sequences
 pub fn unescapeString(allocator: Allocator, value: []const u8) ![]u8 {
-    var result = std.ArrayList(u8).init(allocator);
-    errdefer result.deinit();
+    var result = std.ArrayList(u8){};
+    errdefer result.deinit(allocator);
 
     var i: usize = 0;
     while (i < value.len) {
@@ -41,34 +41,34 @@ pub fn unescapeString(allocator: Allocator, value: []const u8) ![]u8 {
             const next = value[i + 1];
             switch (next) {
                 'n' => {
-                    try result.append('\n');
+                    try result.append(allocator, '\n');
                     i += 2;
                 },
                 't' => {
-                    try result.append('\t');
+                    try result.append(allocator, '\t');
                     i += 2;
                 },
                 'r' => {
-                    try result.append('\r');
+                    try result.append(allocator, '\r');
                     i += 2;
                 },
                 BACKSLASH => {
-                    try result.append(BACKSLASH);
+                    try result.append(allocator, BACKSLASH);
                     i += 2;
                 },
                 DOUBLE_QUOTE => {
-                    try result.append(DOUBLE_QUOTE);
+                    try result.append(allocator, DOUBLE_QUOTE);
                     i += 2;
                 },
                 else => return errors.ParseError.InvalidEscapeSequence,
             }
         } else {
-            try result.append(value[i]);
+            try result.append(allocator, value[i]);
             i += 1;
         }
     }
 
-    return try result.toOwnedSlice();
+    return try result.toOwnedSlice(allocator);
 }
 
 /// Finds the index of the closing double quote, accounting for escape sequences
@@ -320,13 +320,13 @@ pub fn parseArrayHeaderLine(
                     const fields_content = content[bs + 1 .. be];
                     const field_strs = try parseDelimitedValues(allocator, fields_content, parsed_bracket.delimiter);
 
-                    var field_list = std.ArrayList([]u8).init(allocator);
+                    var field_list = std.ArrayList([]u8){};
                     for (field_strs) |field| {
                         const trimmed_field = std.mem.trim(u8, field, &std.ascii.whitespace);
                         const parsed_field = try parseStringLiteral(allocator, trimmed_field);
-                        try field_list.append(parsed_field);
+                        try field_list.append(allocator, parsed_field);
                     }
-                    fields = try field_list.toOwnedSlice();
+                    fields = try field_list.toOwnedSlice(allocator);
                 }
             }
         }
@@ -374,11 +374,11 @@ pub fn parseBracketSegment(seg: []const u8, default_delimiter: Delimiter) !Parse
 
 /// Parses delimited values respecting quotes and escape sequences
 pub fn parseDelimitedValues(allocator: Allocator, input: []const u8, delimiter: Delimiter) ![][]const u8 {
-    var values = std.ArrayList([]const u8).init(allocator);
-    errdefer values.deinit();
+    var values = std.ArrayList([]const u8){};
+    errdefer values.deinit(allocator);
 
-    var value_buffer = std.ArrayList(u8).init(allocator);
-    defer value_buffer.deinit();
+    var value_buffer = std.ArrayList(u8){};
+    defer value_buffer.deinit(allocator);
 
     var in_quotes = false;
     var i: usize = 0;
@@ -387,52 +387,52 @@ pub fn parseDelimitedValues(allocator: Allocator, input: []const u8, delimiter: 
         const char = input[i];
 
         if (char == BACKSLASH and i + 1 < input.len and in_quotes) {
-            try value_buffer.append(char);
+            try value_buffer.append(allocator, char);
             i += 1;
-            try value_buffer.append(input[i]);
+            try value_buffer.append(allocator, input[i]);
             i += 1;
             continue;
         }
 
         if (char == DOUBLE_QUOTE) {
             in_quotes = !in_quotes;
-            try value_buffer.append(char);
+            try value_buffer.append(allocator, char);
             i += 1;
             continue;
         }
 
         if (char == delimiter and !in_quotes) {
             const value = try allocator.dupe(u8, value_buffer.items);
-            try values.append(value);
+            try values.append(allocator, value);
             value_buffer.clearRetainingCapacity();
             i += 1;
             continue;
         }
 
-        try value_buffer.append(char);
+        try value_buffer.append(allocator, char);
         i += 1;
     }
 
     // Add last value
     if (value_buffer.items.len > 0 or values.items.len > 0) {
         const value = try allocator.dupe(u8, value_buffer.items);
-        try values.append(value);
+        try values.append(allocator, value);
     }
 
-    return try values.toOwnedSlice();
+    return try values.toOwnedSlice(allocator);
 }
 
 /// Maps row values to primitives
 pub fn mapRowValuesToPrimitives(allocator: Allocator, values: []const []const u8) ![]JsonPrimitive {
-    var primitives = std.ArrayList(JsonPrimitive).init(allocator);
-    errdefer primitives.deinit();
+    var primitives = std.ArrayList(JsonPrimitive){};
+    errdefer primitives.deinit(allocator);
 
     for (values) |value| {
         const primitive = try parsePrimitiveToken(allocator, value);
-        try primitives.append(primitive);
+        try primitives.append(allocator, primitive);
     }
 
-    return try primitives.toOwnedSlice();
+    return try primitives.toOwnedSlice(allocator);
 }
 
 // #endregion

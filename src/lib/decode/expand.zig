@@ -31,12 +31,12 @@ pub fn expandPathsSafe(allocator: Allocator, value: JsonValue, quoted_keys: ?std
     switch (value) {
         .array => |arr| {
             // Recursively expand array elements
-            var expanded_array = JsonArray.init(allocator);
-            errdefer expanded_array.deinit();
+            var expanded_array = JsonArray{};
+            errdefer expanded_array.deinit(allocator);
 
             for (arr.items) |item| {
                 const expanded_item = try expandPathsSafe(allocator, item, null, strict);
-                try expanded_array.append(expanded_item);
+                try expanded_array.append(allocator, expanded_item);
             }
 
             return JsonValue{ .array = expanded_array };
@@ -55,12 +55,12 @@ pub fn expandPathsSafe(allocator: Allocator, value: JsonValue, quoted_keys: ?std
 
                 // Check if key contains dots and should be expanded
                 if (std.mem.indexOfScalar(u8, key, DOT) != null and !is_quoted) {
-                    var segments = std.ArrayList([]const u8).init(allocator);
-                    defer segments.deinit();
+                    var segments = std.ArrayList([]const u8){};
+                    defer segments.deinit(allocator);
 
                     var segment_iter = std.mem.splitScalar(u8, key, DOT);
                     while (segment_iter.next()) |segment| {
-                        try segments.append(segment);
+                        try segments.append(allocator, segment);
                     }
 
                     // Validate all segments are identifiers
@@ -84,10 +84,10 @@ pub fn expandPathsSafe(allocator: Allocator, value: JsonValue, quoted_keys: ?std
                 const expanded_value = try expandPathsSafe(allocator, key_value, null, strict);
 
                 // Check for conflicts with already-expanded keys
-                if (expanded_object.get(key)) |conflicting_value| {
+                if (expanded_object.getPtr(key)) |conflicting_value| {
                     // If both are objects, try to merge them
-                    if (canMerge(conflicting_value, expanded_value)) {
-                        try mergeObjects(allocator, conflicting_value.object, expanded_value.object, strict);
+                    if (canMerge(conflicting_value.*, expanded_value)) {
+                        try mergeObjects(allocator, &conflicting_value.object, expanded_value.object, strict);
                     } else {
                         // Conflict: incompatible types
                         if (strict) {
@@ -161,7 +161,7 @@ fn insertPathSafe(
     if (current_node.getPtr(last_seg)) |destination_value| {
         if (canMerge(destination_value.*, value)) {
             // Both are objects - deep merge
-            try mergeObjects(allocator, destination_value.object, value.object, strict);
+            try mergeObjects(allocator, &destination_value.object, value.object, strict);
         } else {
             // Conflict: incompatible types
             if (strict) {
@@ -184,7 +184,7 @@ fn insertPathSafe(
 /// - Otherwise: conflict (strict returns error, non-strict overwrites)
 fn mergeObjects(
     allocator: Allocator,
-    target: JsonObject,
+    target: *JsonObject,
     source: JsonObject,
     strict: bool,
 ) !void {
@@ -196,7 +196,7 @@ fn mergeObjects(
         if (target.getPtr(key)) |target_value| {
             if (canMerge(target_value.*, source_value)) {
                 // Both are objects - recursively merge
-                try mergeObjects(allocator, target_value.object, source_value.object, strict);
+                try mergeObjects(allocator, &target_value.object, source_value.object, strict);
             } else {
                 // Conflict: incompatible types
                 if (strict) {

@@ -27,6 +27,8 @@ pub const EncodingOptions = struct {
 
 pub const ResolvedEncodingOptions = EncodingOptions;
 
+pub const ExpandPathsMode = enum { off, safe };
+
 /// Options for decoding TOON data.
 pub const DecodingOptions = struct {
     /// Number of spaces per indentation level.
@@ -36,10 +38,14 @@ pub const DecodingOptions = struct {
     /// Whether to enable path expansion to reconstruct dotted keys into nested objects.
     /// When set to 'safe', keys containing dots are expanded into nested structures if all segments are valid identifiers (e.g., data.metadata.items becomes nested objects).
     /// Pairs with key folding set to 'safe' for lossless round-trips.
-    expand_paths: enum { off, safe } = .off,
+    expand_paths: ExpandPathsMode = .off,
 };
 
-pub const ResolvedDecodingOptions = DecodingOptions;
+pub const ResolvedDecodingOptions = struct {
+    indent: u64,
+    strict: bool,
+    expand_paths: ExpandPathsMode,
+};
 
 pub const ArrayHeaderInfo = struct { key: ?[]const u8, length: u64, delimiter: constants.Delimiter, fields: ?[]const []const u8 };
 

@@ -68,13 +68,13 @@ fn isKeyValueLine(line: ParsedLine) bool {
 // #region Object decoding
 
 const DecodeKeyValueResult = struct {
-    key: []u8,
+    key: []const u8,
     value: JsonValue,
     follow_depth: Depth,
     is_quoted: bool,
 };
 
-fn decodeObject(allocator: Allocator, cursor: *LineCursor, base_depth: Depth, options: ResolvedDecodingOptions) !JsonValue {
+fn decodeObject(allocator: Allocator, cursor: *LineCursor, base_depth: Depth, options: ResolvedDecodingOptions) errors.DecodeError!JsonValue {
     var obj = JsonObject.init(allocator);
     errdefer obj.deinit();
 
@@ -169,13 +169,13 @@ fn decodeArrayFromHeader(
     cursor: *LineCursor,
     base_depth: Depth,
     options: ResolvedDecodingOptions,
-) !JsonValue {
+) errors.DecodeError!JsonValue {
     // Inline primitive array
     if (inline_values) |iv| {
         const primitives = try decodeInlinePrimitiveArray(allocator, header, iv, options);
-        var array = JsonArray.init(allocator);
+        var array = JsonArray{};
         for (primitives) |prim| {
-            try array.append(JsonValue{ .primitive = prim });
+            try array.append(allocator, JsonValue{ .primitive = prim });
         }
         return JsonValue{ .array = array };
     }
@@ -218,9 +218,9 @@ fn decodeListArray(
     cursor: *LineCursor,
     base_depth: Depth,
     options: ResolvedDecodingOptions,
-) !JsonValue {
-    var items = JsonArray.init(allocator);
-    errdefer items.deinit();
+) errors.DecodeError!JsonValue {
+    var items = JsonArray{};
+    errdefer items.deinit(allocator);
 
     const item_depth = base_depth + 1;
     var start_line: ?u64 = null;
@@ -240,7 +240,7 @@ fn decodeListArray(
             end_line = line.line_number;
 
             const item = try decodeListItem(allocator, cursor, item_depth, options);
-            try items.append(item);
+            try items.append(allocator, item);
 
             const current_line = cursor.current();
             if (current_line) |cl| {
@@ -278,8 +278,8 @@ fn decodeTabularArray(
     base_depth: Depth,
     options: ResolvedDecodingOptions,
 ) !JsonValue {
-    var objects = JsonArray.init(allocator);
-    errdefer objects.deinit();
+    var objects = JsonArray{};
+    errdefer objects.deinit(allocator);
 
     const row_depth = base_depth + 1;
     var start_line: ?u64 = null;
@@ -310,7 +310,7 @@ fn decodeTabularArray(
                 try obj.put(field, JsonValue{ .primitive = primitives[i] });
             }
 
-            try objects.append(JsonValue{ .object = obj });
+            try objects.append(allocator, JsonValue{ .object = obj });
         } else {
             break;
         }
@@ -392,7 +392,7 @@ fn decodeObjectFromListItem(
     cursor: *LineCursor,
     base_depth: Depth,
     options: ResolvedDecodingOptions,
-) !JsonValue {
+) errors.DecodeError!JsonValue {
     const after_hyphen = first_line.content[LIST_ITEM_PREFIX.len..];
     const result = try decodeKeyValue(allocator, after_hyphen, cursor, base_depth, options);
 

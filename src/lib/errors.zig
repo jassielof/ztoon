@@ -20,6 +20,8 @@ pub const ParseError = error{
     InvalidArrayLength,
     /// Invalid numeric literal
     InvalidNumericLiteral,
+    /// Invalid character in input
+    InvalidCharacter,
     /// Syntax error in parsing
     SyntaxError,
 } || std.mem.Allocator.Error;
