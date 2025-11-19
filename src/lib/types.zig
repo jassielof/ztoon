@@ -25,7 +25,12 @@ pub const EncodingOptions = struct {
     flatten_depth: ?u64 = null,
 };
 
-pub const ResolvedEncodingOptions = EncodingOptions;
+pub const ResolvedEncodingOptions = struct {
+    indent: u64,
+    delimiter: constants.Delimiter,
+    key_folding: enum { off, safe },
+    flatten_depth: ?u64,
+};
 
 pub const ExpandPathsMode = enum { off, safe };
 
