@@ -4,7 +4,8 @@ const Scanner = @import("../../Scanner.zig");
 const Context = @import("../Context.zig");
 const parseFieldValue = @import("value.zig").parseFieldValue;
 const parsePrimitiveValue = @import("value.zig").parsePrimitiveValue;
-const fieldMatches = @import("../..//utils/field.zig").fieldMatches;
+const fieldMatches = @import("../../utils/field.zig").fieldMatches;
+
 pub fn parseTabularArray(
     comptime T: type,
     header: ArrayHeader,

@@ -1,12 +1,12 @@
 const std = @import("std");
 const testing = std.testing;
 
-const ztoon = @import("toonz");
+const toonz = @import("toonz");
 
 comptime {
     _ = @import("basic.zig");
     _ = @import("parse.zig");
-    _ = @import("stringify.zig");
+    // _ = @import("stringify.zig");
 }
 
 test {

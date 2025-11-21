@@ -1,6 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
-const ztoon = @import("toonz");
+const toonz = @import("toonz");
 
 const @"toon.sample" = @embedFile("data/sample.toon");
 const @"sample.json" = @embedFile("data/sample.json");
@@ -19,7 +19,7 @@ const Sample = struct { context: struct {
 } };
 
 test "Basic parsing" {
-    const parsed = try ztoon.Parse.fromSlice(Sample, testing.allocator, @"toon.sample", .{});
+    const parsed = try toonz.Parse.fromSlice(Sample, testing.allocator, @"toon.sample", .{});
     defer parsed.deinit();
 
     const actual = parsed.value;
@@ -30,4 +30,4 @@ test "Basic parsing" {
     try testing.expectEqualDeep(expected.value, actual);
 }
 
-test "Basic stringify" {}
+test "Basic stringifying" {}

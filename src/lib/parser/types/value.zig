@@ -1,4 +1,5 @@
 const std = @import("std");
+const types = @import("../../types.zig");
 const Allocator = std.mem.Allocator;
 const number = @import("number.zig");
 const parseStruct = @import("object.zig").parseStruct;
@@ -71,6 +72,14 @@ pub fn parseValue(comptime T: type, scanner: *Scanner, base_indent: usize, ctx: 
     ctx.depth += 1;
     defer ctx.depth -= 1;
     const type_info = @typeInfo(T);
+
+    if (T == types.JsonValue or T == std.json.Value) {
+        // Read the next line as the JSON string
+        const line = scanner.peek() orelse return error.UnexpectedEof;
+        _ = scanner.next();
+        // Parse using std.json
+        return try std.json.parseFromSlice(T, ctx.allocator, line.content, .{});
+    }
     return switch (type_info) {
         .@"struct" => try parseStruct(T, scanner, base_indent, ctx),
         .pointer => |ptr| blk: {

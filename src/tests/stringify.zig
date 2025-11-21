@@ -1,23 +1,26 @@
 const std = @import("std");
 const testing = std.testing;
 const utils = @import("utils.zig");
+const types = @import("types.zig");
 
-test "stringify fixtures" {
+test "Stringify specification fixtures" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    const fixtures = try utils.loadJsonFixtures(allocator, "src/tests/spec/tests/fixtures/encode/");
+    const fixtures = try utils.loadJsonFixtures(allocator, "spec/tests/fixtures/encode/");
 
     var fxt_it = fixtures.iterator();
     while (fxt_it.next()) |entry| {
-        std.debug.print("Stringify test - {s}: {f}\n", .{
-            entry.key_ptr.*,
-            std.json.fmt(entry.value_ptr.*, .{}),
-        });
+        const fixture = try std.json.parseFromValue(types.Fixtures, allocator, entry.value_ptr.*, .{});
+        defer fixture.deinit();
 
-        // Your parse testing logic here
-        // const result = try yourParser.parse(entry.value_ptr.*);
-        // try testing.expect(result.isValid());
+        std.debug.print("Description: {s}\n", .{fixture.value.description});
+
+        for (fixture.value.tests, 0..) |test_case, i| {
+            std.debug.print("\tTest {}: {s}\n", .{ i + 1, test_case.name });
+
+            std.debug.print("\tInput:\n{any}\n", .{test_case.input.object});
+        }
     }
 }
