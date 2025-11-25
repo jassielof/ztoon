@@ -76,8 +76,6 @@ pub fn parseValue(comptime T: type, scanner: *Scanner, base_indent: usize, ctx: 
     defer ctx.depth -= 1;
     const type_info = @typeInfo(T);
 
-    if (T == std.json.Value) {
-    }
     return switch (type_info) {
         .@"struct" => try parseStruct(T, scanner, base_indent, ctx),
         .pointer => |ptr| blk: {

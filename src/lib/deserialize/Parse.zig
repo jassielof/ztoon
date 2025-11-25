@@ -101,6 +101,7 @@ pub fn fromSlice(comptime T: type, allocator: Allocator, input: []const u8, opti
     };
 }
 
+/// Parse a TOON document from a pre-processed TOON document.
 pub fn fromValue(comptime T: type, allocator: Allocator, val: anytype, options: Options) !Parsed(T) {
     _ = allocator;
     _ = val;

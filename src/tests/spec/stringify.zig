@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const utils = @import("utils.zig");
-const types = @import("types.zig");
+const Fixture = @import("Fixture.zig");
 
 test "Stringify specification fixtures" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -12,16 +12,13 @@ test "Stringify specification fixtures" {
 
     var fxt_it = fixtures.iterator();
     while (fxt_it.next()) |entry| {
-        const fixture = try std.json.parseFromValue(types.Fixtures, allocator, entry.value_ptr.*, .{});
-        defer fixture.deinit();
+        const fixture = try std.json.parseFromValue(Fixture, allocator, entry.value_ptr.*, .{});
 
-        // std.debug.print("Description: {s}\n", .{fixture.value.description});
+        std.debug.print("Description: {s}\n", .{fixture.value.description});
 
         for (fixture.value.tests, 0..) |test_case, i| {
-            // std.debug.print("\tTest {}: {s}\n", .{ i + 1, test_case.name });
-            _ = test_case;
-            _ = i;
-            // std.debug.print("\tInput:\n{any}\n", .{test_case.input.object});
+            std.debug.print("- Test {}: {s}\n", .{ i + 1, test_case.name });
+            std.debug.print("Input:\n{f}\n", .{std.json.fmt(test_case.input, .{})});
         }
     }
 }
