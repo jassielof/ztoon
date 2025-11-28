@@ -8,6 +8,10 @@ const Scanner = @This();
 lines: []Line,
 current_index: usize,
 allocator: Allocator,
+/// Line numbers of blank lines (for strict mode validation)
+blank_lines: []usize,
+/// Line numbers where tabs were used in indentation (for strict mode)
+tab_indent_lines: []usize,
 
 /// A single line in the TOON input
 pub const Line = struct {
@@ -22,16 +26,42 @@ pub fn init(allocator: Allocator, source: []const u8, expected_indent: usize) !S
     var line_list = std.array_list.Managed(Line).init(allocator);
     errdefer line_list.deinit();
 
+    var blank_line_list = std.array_list.Managed(usize).init(allocator);
+    errdefer blank_line_list.deinit();
+
+    var tab_indent_list = std.array_list.Managed(usize).init(allocator);
+    errdefer tab_indent_list.deinit();
+
     var line_iter = std.mem.splitScalar(u8, source, '\n');
     var line_number: usize = 1;
     while (line_iter.next()) |raw_line| : (line_number += 1) {
-        if (raw_line.len == 0) continue;
+        // Empty line (completely blank)
+        if (raw_line.len == 0) {
+            try blank_line_list.append(line_number);
+            continue;
+        }
 
         const trimmed_end = std.mem.trimRight(u8, raw_line, &std.ascii.whitespace);
-        if (trimmed_end.len == 0) continue;
 
-        const first_non_space = std.mem.indexOfNone(u8, trimmed_end, " \t") orelse continue;
+        // Line with only whitespace (also blank)
+        if (trimmed_end.len == 0) {
+            try blank_line_list.append(line_number);
+            continue;
+        }
+
+        const first_non_space = std.mem.indexOfNone(u8, trimmed_end, " \t") orelse {
+            try blank_line_list.append(line_number);
+            continue;
+        };
+
+        // Comment line
         if (trimmed_end[first_non_space] == '#') continue;
+
+        // Check for tabs in indentation (before first non-space character)
+        const indent_part = trimmed_end[0..first_non_space];
+        if (std.mem.indexOfScalar(u8, indent_part, '\t') != null) {
+            try tab_indent_list.append(line_number);
+        }
 
         const indent = countLeadingSpaces(trimmed_end);
         const contennt = trimmed_end[indent..];
@@ -47,12 +77,31 @@ pub fn init(allocator: Allocator, source: []const u8, expected_indent: usize) !S
         .lines = try line_list.toOwnedSlice(),
         .current_index = 0,
         .allocator = allocator,
+        .blank_lines = try blank_line_list.toOwnedSlice(),
+        .tab_indent_lines = try tab_indent_list.toOwnedSlice(),
     };
 }
 
 /// Deinitialize the scanner and free resources
 pub fn deinit(self: *Scanner) void {
     self.allocator.free(self.lines);
+    self.allocator.free(self.blank_lines);
+    self.allocator.free(self.tab_indent_lines);
+}
+
+/// Check if there are any blank lines between two line numbers (exclusive)
+pub fn hasBlankLinesBetween(self: *const Scanner, start_line: usize, end_line: usize) bool {
+    for (self.blank_lines) |blank_line| {
+        if (blank_line > start_line and blank_line < end_line) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// Check if any lines have tabs in indentation
+pub fn hasTabIndentation(self: *const Scanner) bool {
+    return self.tab_indent_lines.len > 0;
 }
 
 /// Peek at the current line without consuming it

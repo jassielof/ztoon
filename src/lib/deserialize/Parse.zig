@@ -8,10 +8,12 @@ const Reader = std.Io.Reader;
 const Allocator = std.mem.Allocator;
 pub const Scanner = @import("Scanner.zig");
 const Context = @import("Context.zig");
-const Options = @import("Options.zig");
+pub const Options = @import("Options.zig");
 const value = @import("types/value.zig").parseValue;
 const parseFieldValue = @import("types/value.zig").parseFieldValue;
 const fieldMatches = @import("../utils/case.zig").fieldCaseMatches;
+const expand = @import("expand.zig");
+const Value = @import("../Value.zig").Value;
 
 /// Parse a tabular row into a struct of type T.
 fn parseTabularRow(
@@ -61,13 +63,45 @@ fn internal(comptime T: type, allocator: Allocator, source: anytype, options: Op
     var scanner = try Scanner.init(allocator, source, options.indent);
     defer scanner.deinit();
 
+    // Strict mode indentation validation (§14.3)
+    if (options.strict orelse true) {
+        // Check for tabs in indentation
+        if (scanner.hasTabIndentation()) {
+            return error.SyntaxError;
+        }
+
+        // Check for non-multiple indentation
+        for (scanner.lines) |line| {
+            if (line.indent > 0 and line.indent % options.indent != 0) {
+                return error.SyntaxError;
+            }
+        }
+    }
+
     var ctx = Context{
         .allocator = allocator,
         .options = options,
         .depth = 0,
     };
 
-    return try value(T, &scanner, 0, &ctx);
+    const parsed = try value(T, &scanner, 0, &ctx);
+
+    // Apply path expansion for Value type when expandPaths=safe
+    if (T == Value and options.expand_paths == .safe) {
+        const strict = options.strict orelse true;
+        const expanded = expand.expandPathsSafe(parsed, allocator, strict) catch |err| {
+            switch (err) {
+                error.PathExpansionConflict => return error.SyntaxError,
+                else => return err,
+            }
+        };
+        // Clean up original value since expansion creates new one
+        var mutable_parsed = parsed;
+        mutable_parsed.deinit(allocator);
+        return expanded;
+    }
+
+    return parsed;
 }
 
 /// A parsed TOON document

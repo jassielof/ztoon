@@ -53,18 +53,20 @@ pub const Value = union(enum) {
             .number_string => |s| .{ .number_string = try allocator.dupe(u8, s) },
             .string => |s| .{ .string = try allocator.dupe(u8, s) },
             .array => |arr| {
-                var new_array = Array.init(allocator);
+                var new_array = std.array_list.Managed(Value).init(allocator);
                 errdefer {
-                    for (new_array.items) |item| {
+                    for (new_array.items) |*item| {
                         item.deinit(allocator);
                     }
-                    new_array.deinit(allocator);
+                    new_array.deinit();
                 }
                 try new_array.ensureTotalCapacity(arr.items.len);
                 for (arr.items) |item| {
                     new_array.appendAssumeCapacity(try item.clone(allocator));
                 }
-                return .{ .array = new_array };
+                const owned_slice = try new_array.toOwnedSlice();
+                const result_arr = Array{ .items = owned_slice, .capacity = owned_slice.len };
+                return .{ .array = result_arr };
             },
             .object => |obj| {
                 var new_object = Object.init(allocator);

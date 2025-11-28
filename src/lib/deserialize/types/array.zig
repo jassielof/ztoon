@@ -5,6 +5,77 @@ const Context = @import("../Context.zig");
 const parseFieldValue = @import("value.zig").parseFieldValue;
 const parsePrimitiveValue = @import("value.zig").parsePrimitiveValue;
 const fieldMatches = @import("../../utils/case.zig").fieldCaseMatches;
+const string = @import("string.zig");
+
+/// Parse delimited field names, respecting quoted strings
+fn parseDelimitedFields(input: []const u8, delimiter: u8, allocator: Allocator) ![][]const u8 {
+    var fields = std.array_list.Managed([]const u8).init(allocator);
+    errdefer {
+        for (fields.items) |f| allocator.free(f);
+        fields.deinit();
+    }
+
+    var value_buffer = std.array_list.Managed(u8).init(allocator);
+    defer value_buffer.deinit();
+
+    var in_quotes = false;
+    var i: usize = 0;
+
+    while (i < input.len) {
+        const char = input[i];
+
+        // Handle escape sequences in quoted strings
+        if (char == '\\' and i + 1 < input.len and in_quotes) {
+            try value_buffer.append(char);
+            try value_buffer.append(input[i + 1]);
+            i += 2;
+            continue;
+        }
+
+        // Handle quote toggle
+        if (char == '"') {
+            in_quotes = !in_quotes;
+            try value_buffer.append(char);
+            i += 1;
+            continue;
+        }
+
+        // Handle delimiter (only outside quotes)
+        if (char == delimiter and !in_quotes) {
+            const trimmed = std.mem.trim(u8, value_buffer.items, &std.ascii.whitespace);
+            try fields.append(try allocator.dupe(u8, trimmed));
+            value_buffer.clearRetainingCapacity();
+            i += 1;
+            continue;
+        }
+
+        // Regular character
+        try value_buffer.append(char);
+        i += 1;
+    }
+
+    // Add last field
+    if (value_buffer.items.len > 0 or fields.items.len > 0) {
+        const trimmed = std.mem.trim(u8, value_buffer.items, &std.ascii.whitespace);
+        try fields.append(try allocator.dupe(u8, trimmed));
+    }
+
+    return fields.toOwnedSlice();
+}
+
+/// Parse a field name, unquoting and unescaping if needed
+fn parseFieldName(field: []const u8, allocator: Allocator) ![]const u8 {
+    const trimmed = std.mem.trim(u8, field, &std.ascii.whitespace);
+    if (trimmed.len == 0) return try allocator.dupe(u8, "");
+
+    // If quoted, parse as string to unescape
+    if (trimmed.len >= 2 and trimmed[0] == '"' and trimmed[trimmed.len - 1] == '"') {
+        return try string.parseString(trimmed, allocator);
+    }
+
+    // Unquoted field name
+    return try allocator.dupe(u8, trimmed);
+}
 
 /// TOON delimiter types per spec §11
 pub const Delimiter = enum {
@@ -65,7 +136,7 @@ pub fn parseTabularArray(
 
     // Verify count matches header
     if (row_count != header.length) {
-        return error.CountMismatch;
+        return error.SyntaxError;
     }
 
     return items.toOwnedSlice();
@@ -151,7 +222,7 @@ pub fn parsePrimitiveArray(
 
     // Verify count matches header
     if (count != header.length) {
-        return error.CountMismatch;
+        return error.SyntaxError;
     }
 
     return items.toOwnedSlice();
@@ -204,7 +275,7 @@ pub fn parseListArray(
 
     // Verify count matches header
     if (count != header.length) {
-        return error.CountMismatch;
+        return error.SyntaxError;
     }
 
     return items.toOwnedSlice();
@@ -314,7 +385,7 @@ fn parseListItemInlineArray(
     }
 
     if (count != length) {
-        return error.CountMismatch;
+        return error.SyntaxError;
     }
 
     return result.toOwnedSlice();
@@ -393,10 +464,35 @@ fn parseListItemObject(
 }
 
 pub fn parseArrayHeader(content: []const u8, allocator: Allocator) !ArrayHeader {
-    const open_bracket = std.mem.indexOfScalar(u8, content, '[') orelse return error.SyntaxError;
-    const close_bracket = std.mem.indexOfScalar(u8, content, ']') orelse return error.SyntaxError;
-    const key = std.mem.trim(u8, content[0..open_bracket], &std.ascii.whitespace);
-    const bracket_content = content[open_bracket + 1 .. close_bracket];
+    // Find the bracket, skipping any quoted sections
+    var open_bracket: ?usize = null;
+    var in_quotes = false;
+    var i: usize = 0;
+    while (i < content.len) : (i += 1) {
+        const char = content[i];
+        // Handle escapes in quotes
+        if (char == '\\' and in_quotes and i + 1 < content.len) {
+            i += 1; // Skip next character
+            continue;
+        }
+        // Toggle quotes
+        if (char == '"') {
+            in_quotes = !in_quotes;
+            continue;
+        }
+        // Find bracket outside quotes
+        if (char == '[' and !in_quotes) {
+            open_bracket = i;
+            break;
+        }
+    }
+
+    const bracket_start = open_bracket orelse return error.SyntaxError;
+    const close_bracket = std.mem.indexOfScalar(u8, content[bracket_start..], ']') orelse return error.SyntaxError;
+    const close_bracket_abs = bracket_start + close_bracket;
+
+    const key = std.mem.trim(u8, content[0..bracket_start], &std.ascii.whitespace);
+    const bracket_content = content[bracket_start + 1 .. close_bracket_abs];
 
     // Parse delimiter from bracket content per spec §6
     // [N] = comma (default), [N\t] = tab, [N|] = pipe
@@ -416,7 +512,7 @@ pub fn parseArrayHeader(content: []const u8, allocator: Allocator) !ArrayHeader 
 
     // Check for field specification
     var fields: ?[][]const u8 = null;
-    const after_bracket = content[close_bracket + 1 ..];
+    const after_bracket = content[close_bracket_abs + 1 ..];
 
     if (std.mem.indexOfScalar(u8, after_bracket, '{')) |open_brace_idx| {
         const close_brace = std.mem.indexOfScalar(u8, after_bracket, '}') orelse return error.SyntaxError;
@@ -428,12 +524,19 @@ pub fn parseArrayHeader(content: []const u8, allocator: Allocator) !ArrayHeader 
             field_list.deinit();
         }
 
-        // Split fields by the active delimiter (spec §6: fields use same delimiter as bracket)
+        // Parse fields using delimiter-aware splitting (handles quoted field names)
+        // Per spec §6: fields use same delimiter as bracket, and quoted names MUST be unescaped
         const delim_char = delimiter.char();
-        var field_iter = std.mem.splitScalar(u8, fields_str, delim_char);
-        while (field_iter.next()) |field| {
-            const trimmed = std.mem.trim(u8, field, &std.ascii.whitespace);
-            try field_list.append(try allocator.dupe(u8, trimmed));
+        const parsed_fields = try parseDelimitedFields(fields_str, delim_char, allocator);
+        defer {
+            for (parsed_fields) |f| allocator.free(f);
+            allocator.free(parsed_fields);
+        }
+
+        for (parsed_fields) |field| {
+            // Parse field name (unquote and unescape if quoted)
+            const field_name = try parseFieldName(field, allocator);
+            try field_list.append(field_name);
         }
 
         fields = try field_list.toOwnedSlice();
