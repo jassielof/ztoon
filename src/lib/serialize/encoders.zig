@@ -188,11 +188,15 @@ fn encodeKeyValuePairLines(
             else => |e| return e,
         };
         defer allocator.free(encoded_value);
-        try writeIndentedLine(depth, try std.fmt.allocPrint(allocator, "{s}: {s}", .{ encoded_key, encoded_value }), options.indent, writer, allocator);
+        const line = try std.fmt.allocPrint(allocator, "{s}: {s}", .{ encoded_key, encoded_value });
+        defer allocator.free(line);
+        try writeIndentedLine(depth, line, options.indent, writer, allocator);
     } else if (normalize.isJsonArray(value)) {
         try encodeArrayLines(key, value.array, depth, options, writer, allocator);
     } else if (normalize.isJsonObject(value)) {
-        try writeIndentedLine(depth, try std.fmt.allocPrint(allocator, "{s}:", .{encoded_key}), options.indent, writer, allocator);
+        const line = try std.fmt.allocPrint(allocator, "{s}:", .{encoded_key});
+        defer allocator.free(line);
+        try writeIndentedLine(depth, line, options.indent, writer, allocator);
         if (!normalize.isEmptyObject(value.object)) {
             try encodeObjectLines(value.object, depth + 1, options, writer, allocator, root_literal_keys, current_path, flatten_depth);
         }
@@ -634,6 +638,7 @@ fn writeIndentedLine(
         try writer.writeByte(' ');
     }
     try writer.writeAll(content);
+    try writer.writeByte('\n');
 }
 
 /// Writes an indented list item.

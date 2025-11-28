@@ -24,9 +24,11 @@ pub fn main() !void {
 
     switch (command) {
         .serialize => |cmd| {
+            defer freeCommandStrings(cmd, allocator);
             try serialize_cmd.run(cmd, allocator);
         },
         .deserialize => |cmd| {
+            defer freeCommandStrings(cmd, allocator);
             try deserialize_cmd.run(cmd, allocator);
         },
         .format => {
@@ -34,6 +36,7 @@ pub fn main() !void {
         },
         .auto => |cmd| {
             // Auto-detect based on file extension or flags
+            defer freeAutoCommandStrings(cmd, allocator);
             try runAuto(cmd, allocator);
         },
     }
@@ -274,6 +277,49 @@ fn detectMode(input_format: InputFormat, output_format: ?OutputFormat) Mode {
     };
 }
 
+
+fn freeCommandStrings(cmd: anytype, allocator: std.mem.Allocator) void {
+    const T = @TypeOf(cmd);
+    switch (@typeInfo(T)) {
+        .@"struct" => |s| {
+            inline for (s.fields) |field| {
+                const field_value = @field(cmd, field.name);
+                const FieldType = @TypeOf(field_value);
+
+                // Handle optional strings
+                if (FieldType == ?[]const u8) {
+                    if (field_value) |path| {
+                        allocator.free(path);
+                    }
+                }
+                // Handle InputSource union (file/stdin)
+                else if (FieldType == serialize_cmd.InputSource) {
+                    switch (field_value) {
+                        .file => |path| allocator.free(path),
+                        .stdin => {},
+                    }
+                }
+                // Handle deserialize InputSource
+                else if (FieldType == deserialize_cmd.InputSource) {
+                    switch (field_value) {
+                        .file => |path| allocator.free(path),
+                        .stdin => {},
+                    }
+                }
+            }
+        },
+        else => {},
+    }
+}
+
+fn freeAutoCommandStrings(cmd: AutoCommand, allocator: std.mem.Allocator) void {
+    if (cmd.input_path) |path| {
+        allocator.free(path);
+    }
+    if (cmd.output_path) |path| {
+        allocator.free(path);
+    }
+}
 
 fn printUsage() void {
     const stderr_file = std.fs.File.stderr();
