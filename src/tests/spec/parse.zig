@@ -52,7 +52,7 @@ test "Parse specification fixtures" {
                 continue;
             } else {
                 const parsed_toon = try toonz.Parse.fromSlice(toonz.Value, allocator, test_case.input.string, parse_options);
-                std.debug.print("{any}\n", .{parsed_toon.value});
+                std.debug.print("{f}\n", .{toonz.format.fmt(parsed_toon.value, .{})});
 
                 // TODO: Compare parsed_toon.value with test_case.expected
             }

@@ -36,7 +36,7 @@ test "Basic parsing with variable schema" {
 
     const parsed_val = parsed.value;
 
-    std.debug.print("{any}\n", .{parsed_val});
+    std.debug.print("{f}\n", .{toonz.format.fmt(parsed_val, .{})});
 }
 
 test "Basic stringifying with fixed schema" {}
