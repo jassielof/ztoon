@@ -656,4 +656,5 @@ fn writeIndentedListItem(
     }
     try writer.writeAll(LIST_ITEM_PREFIX);
     try writer.writeAll(content);
+    try writer.writeByte('\n');
 }

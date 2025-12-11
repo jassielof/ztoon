@@ -30,7 +30,14 @@ pub fn stringify(
         else => |e| return e,
     };
 
-    return try list.toOwnedSlice();
+    // Per SPEC §12: No trailing newline at the end of the document
+    const slice = try list.toOwnedSlice();
+    if (slice.len > 0 and slice[slice.len - 1] == '\n') {
+        const trimmed = try allocator.dupe(u8, slice[0 .. slice.len - 1]);
+        allocator.free(slice);
+        return trimmed;
+    }
+    return slice;
 }
 
 /// Stringifies a Value to TOON format.
@@ -49,7 +56,14 @@ pub fn stringifyValue(
         else => |e| return e,
     };
 
-    return try list.toOwnedSlice();
+    // Per SPEC §12: No trailing newline at the end of the document
+    const slice = try list.toOwnedSlice();
+    if (slice.len > 0 and slice[slice.len - 1] == '\n') {
+        const trimmed = try allocator.dupe(u8, slice[0 .. slice.len - 1]);
+        allocator.free(slice);
+        return trimmed;
+    }
+    return slice;
 }
 
 /// Stringifies a std.json.Value to TOON format, writing to a writer.
