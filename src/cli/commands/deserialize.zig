@@ -257,4 +257,3 @@ fn writeOutput(content: []const u8, output_path: ?[]const u8) !void {
         try stdout_file.writeAll("\n");
     }
 }
-

@@ -9,4 +9,3 @@ pub fn run(allocator: std.mem.Allocator) !void {
     try stderr_file.writeAll("Error: Format command is not yet implemented.\n");
     return error.Unimplemented;
 }
-

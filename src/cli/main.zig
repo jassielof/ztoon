@@ -277,7 +277,6 @@ fn detectMode(input_format: InputFormat, output_format: ?OutputFormat) Mode {
     };
 }
 
-
 fn freeCommandStrings(cmd: anytype, allocator: std.mem.Allocator) void {
     const T = @TypeOf(cmd);
     switch (@typeInfo(T)) {
